@@ -1,0 +1,22 @@
+[
+    {
+        "name": "kukka farmi",
+        "coords": [
+            2022.48,
+            4978.56,
+            41.0
+        ],
+        "interior": "Interior2",
+        "price": 500
+    },
+    {
+        "name": "weed farm",
+        "coords": [
+            2015.4957275390626,
+            4976.8720703125,
+            41.3485221862793
+        ],
+        "interior": "Interior1",
+        "price": 1234
+    }
+]
