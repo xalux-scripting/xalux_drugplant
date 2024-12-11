@@ -17,9 +17,9 @@ Config.Interiors = {
 Config.debug = false
 
 Config.processing = {
-    CycleTime = 500,
-    TemperatureIncrease = 10,
-    ExplosionThreshold = 80,
+    CycleTime = 10000, -- how long one cycle lasts by default 10 seconds
+    TemperatureIncrease = 10, -- how much water temperature increases in one cycle
+    ExplosionThreshold = 100, -- when will the water over heat
     EnableExplosion = false, -- Set to false to disable explosions,
     TemperatureResetTime = 60000, -- Time in milliseconds to reset temperature after stopping
     MinimumWaterRequired = 10, -- Minimum water (liters) required to cook
