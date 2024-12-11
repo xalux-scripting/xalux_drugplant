@@ -9,6 +9,7 @@ version '1.0.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
+    '@es_extended/imports.lua',
     'config.lua'
 }
 server_scripts {
