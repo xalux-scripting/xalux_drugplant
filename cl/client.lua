@@ -139,7 +139,7 @@ function RemoveInteriorZones()
         if zoneRef then
             exports.ox_target:removeZone(zoneRef)
         end
-        sphereZones[zoneName] = nil -- Clear the reference
+        sphereZones[zoneName] = nil
     end
 end
 
@@ -195,13 +195,10 @@ RegisterNetEvent('xalux_drug:teleportToInterior', function(coords, plantName, in
         return
     end
 
-    -- Save the player's original coordinates
     originalCoords = GetEntityCoords(PlayerPedId())
 
-    -- Teleport the player to the specified interior coordinates
     SetEntityCoords(PlayerPedId(), coords.x, coords.y, coords.z)
 
-    -- Set up zones for the specific interior
     if interiorName then
         SetupInteriorZones(interiorName)
     end
@@ -236,11 +233,10 @@ end)
 
 
 RegisterCommand('managePlants', function()
-    -- Trigger the server-side event to check admin permissions
     TriggerServerEvent('xalux_drug:checkAdmin')
 end)
 
--- Open the plant management menu if the player is an admin
+
 RegisterNetEvent('xalux_drug:openMenu1', function()
     local plantOptions = {}
 
