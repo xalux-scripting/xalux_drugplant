@@ -75,15 +75,15 @@ local function addTargetZone(coords, radius, name, label, icon, onSelect)
         }
     })
 end
-function SetupInteriorZones(interiorName)
-    RemoveInteriorZones()
+function SetupInteriorZones(interiorName, isOwner)
+    RemoveInteriorZones() 
 
     local interiorData = Config.Interiors[interiorName]
-
     local processedCoords = {}
 
     local CookingCoords = interiorData.CookingCoords
     local returnCoords = interiorData.InsideCoords
+    local ManagementCoords = interiorData.ManagementCoords
 
     if CookingCoords then
         local cookingKey = string.format("%.2f_%.2f_%.2f", CookingCoords.x, CookingCoords.y, CookingCoords.z)
@@ -130,22 +130,224 @@ function SetupInteriorZones(interiorName)
             })
         end
     end
-end
 
-
-
-function RemoveInteriorZones()
-    for zoneName, zoneRef in pairs(sphereZones) do
-        if zoneRef then
-            exports.ox_target:removeZone(zoneRef)
+    if isOwner and ManagementCoords then
+        local managementKey = string.format("%.2f_%.2f_%.2f", ManagementCoords.x, ManagementCoords.y, ManagementCoords.z)
+        if not processedCoords[managementKey] then
+            processedCoords[managementKey] = true
+            local zoneName = "management_" .. interiorName
+            sphereZones[zoneName] = exports.ox_target:addSphereZone({
+                name = zoneName,
+                coords = vec3(ManagementCoords.x, ManagementCoords.y, ManagementCoords.z),
+                radius = 2.0,
+                options = {
+                    {
+                        name = "manage_plant_" .. interiorName,
+                        label = "Manage Plant",
+                        icon = "fas fa-cogs",
+                        onSelect = function()
+                            OpenManagementMenu(interiorName)
+                        end
+                    }
+                }
+            })
         end
-        sphereZones[zoneName] = nil
     end
 end
 
+function RemoveInteriorZones()
+    for zoneName, zoneData in pairs(sphereZones) do
+        if zoneData then
+            exports.ox_target:removeZone(zoneName)
+        end
+    end
+    sphereZones = {}
+end
 
+function OpenManagementMenu(plantId)
+    lib.registerContext({
+        id = 'management_menu',
+        title = 'Plant Management',
+        options = {
+            {
+                title = 'Grant Access',
+                description = 'Give another player access to your plant.',
+                icon = 'fa-solid fa-user-plus',
+                onSelect = function()
+                    OpenGrantAccessMenu(plantId)
+                end
+            },
+            {
+                title = 'View Access List',
+                description = 'View players with access and manage permissions.',
+                icon = 'fa-solid fa-list',
+                onSelect = function()
+                    OpenAccessListMenu(plantId)
+                end
+            },
+            {
+                title = 'Sell Plant',
+                description = 'Sell your plant and receive money.',
+                icon = 'fa-solid fa-dollar-sign',
+                onSelect = function()
+                    ConfirmSellPlant(plantId)
+                end
+            },
+            {
+                title = 'Exit',
+                description = 'Close the menu.',
+                icon = 'fa-solid fa-times',
+                onSelect = function()
+                    lib.hideContext()
+                end
+            }
+        }
+    })
 
+    lib.showContext('management_menu')
+end
 
+function OpenAccessListMenu(plantId)
+    TriggerServerEvent('xalux_drug:getAccessList', plantId)
+
+    RegisterNetEvent('xalux_drug:sendAccessList', function(accessList)
+        if #accessList == 0 then
+            lib.notify({
+                title = 'Access List',
+                description = 'No players have access to this plant.',
+                type = 'inform'
+            })
+            return
+        end
+
+        local options = {}
+        for _, entry in ipairs(accessList) do
+            table.insert(options, {
+                title = entry.steam_name,
+                description = 'Remove access for this player.',
+                icon = 'fa-solid fa-user-minus',
+                onSelect = function()
+                    local confirm = lib.alertDialog({
+                        header = 'Confirm Removal',
+                        content = ('Are you sure you want to remove access for %s?'):format(entry.steam_name),
+                        centered = true,
+                        cancel = true
+                    })
+                    if confirm == 'confirm' then
+                        TriggerServerEvent('xalux_drug:removeAccess', plantId, entry.player_identifier)
+                    end
+                end
+            })
+        end
+
+        table.insert(options, {
+            title = 'Exit',
+            description = 'Close the menu.',
+            icon = 'fa-solid fa-times',
+            onSelect = function()
+                lib.hideContext()
+            end
+        })
+
+        lib.registerContext({
+            id = 'access_list_menu',
+            title = 'Access List',
+            options = options
+        })
+
+        lib.showContext('access_list_menu')
+    end)
+end
+
+function OpenGrantAccessMenu()
+    local dialog = lib.inputDialog('Grant Access', {
+        { label = 'Player ID', type = 'number', placeholder = 'Enter the player ID (server ID)', required = true }
+    })
+
+    if dialog and dialog[1] then
+        local targetPlayerId = tonumber(dialog[1])
+        if targetPlayerId then
+            TriggerServerEvent('xalux_drug:grantAccess', targetPlayerId)
+        else
+            lib.notify({
+                title = "Invalid Input",
+                description = "The player ID must be a valid number.",
+                type = "error"
+            })
+        end
+    else
+        lib.notify({
+            title = "Action Canceled",
+            description = "Grant Access operation has been canceled.",
+            type = "inform"
+        })
+    end
+end
+
+function OpenAccessListMenu(plantId)
+    TriggerServerEvent('xalux_drug:getAccessList', plantId)
+
+    RegisterNetEvent('xalux_drug:sendAccessList', function(accessList)
+        if #accessList == 0 then
+            lib.notify({
+                title = 'Access List',
+                description = 'No players have access to this plant.',
+                type = 'inform'
+            })
+            return
+        end
+
+        local options = {}
+        for _, entry in ipairs(accessList) do
+            table.insert(options, {
+                title = entry.steam_name,
+                description = 'Remove access for this player.',
+                icon = 'fa-solid fa-user-minus',
+                onSelect = function()
+                    local confirm = lib.alertDialog({
+                        header = 'Confirm Removal',
+                        content = ('Are you sure you want to remove access for %s?'):format(entry.steam_name),
+                        centered = true,
+                        cancel = true
+                    })
+                    if confirm == 'confirm' then
+                        TriggerServerEvent('xalux_drug:removeAccess', plantId, entry.player_identifier)
+                    end
+                end
+            })
+        end
+
+        table.insert(options, {
+            title = 'Exit',
+            description = 'Close the menu.',
+            icon = 'fa-solid fa-times',
+            onSelect = function()
+                lib.hideContext()
+            end
+        })
+
+        lib.registerContext({
+            id = 'access_list_menu',
+            title = 'Access List',
+            options = options
+        })
+
+        lib.showContext('access_list_menu')
+    end)
+end
+
+function ConfirmSellPlant(plantId)
+    local confirmation = lib.alertDialog({
+        header = 'Confirm Sale',
+        content = 'Are you sure you want to sell this plant? This action cannot be undone.',
+        centered = true,
+        cancel = true
+    })
+
+    if confirmation == 'confirm' then
+        TriggerServerEvent('xalux_drug:sell', plantId)
+    end
+end
 Citizen.CreateThread(function()
     local rawBuyingPoints = LoadResourceFile(GetCurrentResourceName(), "buyingPoints.json")
     if rawBuyingPoints then
@@ -190,7 +392,7 @@ for _, point in ipairs(buyingPoints) do
 end
 
 end)
-RegisterNetEvent('xalux_drug:teleportToInterior', function(coords, plantName, interiorName)
+RegisterNetEvent('xalux_drug:teleportToInterior', function(coords, plantName, interiorName, isOwner)
     if not coords or not coords.x or not coords.y or not coords.z then
         return
     end
@@ -200,7 +402,7 @@ RegisterNetEvent('xalux_drug:teleportToInterior', function(coords, plantName, in
     SetEntityCoords(PlayerPedId(), coords.x, coords.y, coords.z)
 
     if interiorName then
-        SetupInteriorZones(interiorName)
+        SetupInteriorZones(interiorName, isOwner)
     end
 
     lib.notify({
@@ -209,6 +411,7 @@ RegisterNetEvent('xalux_drug:teleportToInterior', function(coords, plantName, in
         type = "success"
     })
 end)
+
 RegisterNetEvent("interior:leave", function(interiorName)
     if originalCoords then
         SetEntityCoords(PlayerPedId(), originalCoords.x, originalCoords.y, originalCoords.z)
@@ -235,7 +438,6 @@ end)
 RegisterCommand('managePlants', function()
     TriggerServerEvent('xalux_drug:checkAdmin')
 end)
-
 
 RegisterNetEvent('xalux_drug:openMenu1', function()
     local plantOptions = {}
@@ -436,24 +638,13 @@ RegisterNetEvent('xalux_drug:editPlant', function(index, plant)
                 description = "Modify the plant's coordinates.",
                 icon = "map-marker-alt",
                 onSelect = function()
-                    local coordsInput = lib.inputDialog("Change Plant Coordinates", {
-                        { label = "X", type = "number", required = true },
-                        { label = "Y", type = "number", required = true },
-                        { label = "Z", type = "number", required = true }
-                    })
-
-                    if coordsInput then
-                        plant.coords = { x = coordsInput[1], y = coordsInput[2], z = coordsInput[3] }
+                    isSettingCoords = true
+                    currentCallback = function(coords)
+                        plant.coords = { coords.x, coords.y, coords.z }
                         TriggerServerEvent('xalux_drug:updatePlant', index, plant)
-
-                        lib.notify({
-                            title = "Coordinates Updated",
-                            description = "The plant coordinates have been updated.",
-                            type = "success",
-                            icon = "location-arrow"
-                        })
                     end
                 end
+                
             },
             {
                 title = "🗑️ Remove Plant",
@@ -864,7 +1055,6 @@ function ProcessCycle(drugConfig)
     ProcessCycle(drugConfig)
 end
 
-
 function IsAnyMatchAvailable(drugConfig)
     for _, perfectItem in ipairs(drugConfig.PerfectItems) do
         local itemName = perfectItem.item
@@ -875,8 +1065,6 @@ function IsAnyMatchAvailable(drugConfig)
     end
     return false
 end
-
-
 
 function StopProcessing()
     processingActive = false
@@ -912,8 +1100,10 @@ RegisterNetEvent("xalux_drug:stop", function()
 end)
 
 RegisterNetEvent("xalux_drug:explosion", function()
+    local src = source
     local playerPed = PlayerPedId()
     local playerCoords = GetEntityCoords(playerPed)
+    local dispatchCoords = originalCoords 
 
     if Config.processing.EnableExplosion then
         AddExplosion(playerCoords.x, playerCoords.y, playerCoords.z, 29, 10.0, true, false, 1.0)
@@ -926,6 +1116,59 @@ RegisterNetEvent("xalux_drug:explosion", function()
                       "The lab overheated!",
         type = Config.processing.EnableExplosion and "error" or "warning"
     })
+
+    if Config.processing.EnablePoliceNotify then
+        local randomChance = math.random(100)
+        if randomChance <= Config.processing.ProcetaceChange then
+            local dispatchConfig = Config.dispatch
+            if Config.DispatchSystem == "CodeDesign" then
+                exports["cd_dispatch"]:addCall({
+                    code = dispatchConfig.Code,
+                    title = dispatchConfig.Title,
+                    description = dispatchConfig.Description,
+                    coords = dispatchCoords,
+                    sprite = dispatchConfig.Sprite,
+                    color = dispatchConfig.Color,
+                    scale = dispatchConfig.Scale,
+                    job = {"police"},
+                    metadata = {
+                        location = GetStreetNameFromHashKey(GetStreetNameAtCoord(dispatchCoords.x, dispatchCoords.y, dispatchCoords.z))
+                    }
+                })
+            elseif Config.DispatchSystem == "Brutal" then
+                TriggerEvent("brutal-dispatch:sendAlert", {
+                    code = dispatchConfig.Code,
+                    title = dispatchConfig.Title,
+                    description = dispatchConfig.Description,
+                    coords = dispatchCoords,
+                    job = {"police"},
+                    blipData = {
+                        sprite = dispatchConfig.Sprite,
+                        color = dispatchConfig.Color,
+                        scale = dispatchConfig.Scale
+                    },
+                    additionalData = {
+                        location = GetStreetNameFromHashKey(GetStreetNameAtCoord(dispatchCoords.x, dispatchCoords.y, dispatchCoords.z))
+                    }
+                })
+            elseif Config.DispatchSystem == "Quasar" then
+                TriggerServerEvent('qs-dispatch:server:CreateDispatchCall', {
+                    job = { 'police', 'sheriff', 'traffic', 'patrol' },
+                    callLocation = dispatchCoords,
+                    callCode = {dispatchConfig.Code},
+                    message = dispatchConfig.Description,
+                    blip = {
+                        sprite = dispatchConfig.Sprite, 
+                        scale = dispatchConfig.Scale, 
+                        colour = dispatchConfig.Color, 
+                        flashes = true, 
+                        text = dispatchConfig.Title, 
+                        time = (20 * 1000), 
+                    },
+                })
+            end
+        end
+    end
 
     currentSession.temperature = 20
     currentSession.itemsPerCycle = {}
