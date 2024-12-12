@@ -78,6 +78,7 @@ RegisterNetEvent('xalux_drug:checkAdmin', function()
     end
 end)
 
+
 RegisterNetEvent('xalux_drug:buy', function(plantName)
     local playerId = source
     local playerIdentifier = GetPlayerIdentifier(playerId)
@@ -93,21 +94,35 @@ RegisterNetEvent('xalux_drug:buy', function(plantName)
     if not plantData then
         TriggerClientEvent('ox_lib:notify', playerId, {
             title = "Purchase Failed",
-            description = "The plant data could not be found in the JSON file.",
+            description = "The plant data could not be found.",
             type = "error"
         })
         return
     end
 
-    local existingPlant = MySQL.query.await(
-        'SELECT player_identifier FROM player_plants WHERE plant_name = ? AND interior_id = ?',
-        { plantData.name, plantData.interior }
+    local totalPlantsAtLocation = MySQL.scalar.await(
+        'SELECT COUNT(*) FROM player_plants WHERE interior_id = ? AND plant_name = ?',
+        { plantData.interior, plantData.name }
     )
 
-    if existingPlant and #existingPlant > 0 then
+    if totalPlantsAtLocation >= Config.maxPlantsPerLocation then
+        TriggerClientEvent('ox_lib:notify', playerId, {
+            title = "Purchase Unavailable",
+            description = "All plants at this location have been purchased.",
+            type = "error"
+        })
+        return
+    end
+
+    local existingPlantForPlayer = MySQL.query.await(
+        'SELECT player_identifier FROM player_plants WHERE plant_name = ? AND interior_id = ? AND player_identifier = ?',
+        { plantData.name, plantData.interior, playerIdentifier }
+    )
+
+    if existingPlantForPlayer and #existingPlantForPlayer > 0 then
         TriggerClientEvent('ox_lib:notify', playerId, {
             title = "Purchase Failed",
-            description = "This plant has already been purchased by another player.",
+            description = "You have already purchased this plant in this location.",
             type = "error"
         })
         return
@@ -127,20 +142,134 @@ RegisterNetEvent('xalux_drug:buy', function(plantName)
 
     local plantId = generateUniquePlantId()
 
-    MySQL.insert.await('INSERT INTO player_plants (player_identifier, plant_id, plant_name, interior_id) VALUES (?, ?, ?, ?)', {
-        playerIdentifier,
-        plantId,
-        plantData.name,
-        plantData.interior
-    })
+    MySQL.insert.await(
+        'INSERT INTO player_plants (player_identifier, plant_id, plant_name, interior_id, buying_price) VALUES (?, ?, ?, ?, ?)',
+        { playerIdentifier, plantId, plantData.name, plantData.interior, plantData.price }
+    )
 
     TriggerClientEvent('ox_lib:notify', playerId, {
         title = "Purchase Successful",
-        description = "You bought " .. plantData.name .. " and were assigned the interior '" .. plantData.interior .. "'.",
+        description = "You have successfully purchased " .. plantData.name .. " for $" .. plantData.price .. ".",
+        type = "success"
+    })
+
+    sendDiscordLog("Plant Purchased", string.format(
+        "Player **%s** (ID: %d) bought **%s** for $%d at interior ID: %s.",
+        GetPlayerName(playerId), playerId, plantData.name, plantData.price, plantData.interior
+    ), 3447003)
+end)
+
+RegisterNetEvent('xalux_drug:grantAccess', function(targetPlayerId)
+    local src = source
+    local targetIdentifier = GetPlayerIdentifier(targetPlayerId)
+    local targetSteamName = GetPlayerName(targetPlayerId)
+
+    if not targetIdentifier or not targetSteamName then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Grant Access Failed",
+            description = "Invalid player ID or unable to fetch player name.",
+            type = "error"
+        })
+        return
+    end
+    local plantId = GetPlayerRoutingBucket(src)
+
+    local result = MySQL.insert.await(
+        'INSERT INTO plant_permissions (plant_id, player_identifier, steam_name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE steam_name = VALUES(steam_name)',
+        { plantId, targetIdentifier, targetSteamName }
+    )
+
+    if result then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Access Granted",
+            description = ("You have given access to %s."):format(targetSteamName),
+            type = "success"
+        })
+
+        TriggerClientEvent('ox_lib:notify', targetPlayerId, {
+            title = "Access Granted",
+            description = "You have been granted access to a plant.",
+            type = "inform"
+        })
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Grant Access Failed",
+            description = "An error occurred while saving permissions.",
+            type = "error"
+        })
+    end
+end)
+
+RegisterNetEvent('xalux_drug:getAccessList', function(plantId)
+    local src = source
+
+    local result = MySQL.query.await(
+        'SELECT player_identifier, steam_name FROM plant_permissions WHERE plant_id = ?',
+        { plantId }
+    )
+
+    if result and #result > 0 then
+        TriggerClientEvent('xalux_drug:sendAccessList', src, result)
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access List',
+            description = 'No players have access to this plant.',
+            type = 'inform'
+        })
+    end
+end)
+
+RegisterNetEvent('xalux_drug:sell', function()
+    local src = source
+    local playerIdentifier = GetPlayerIdentifier(src)
+
+    local routingBucket = GetPlayerRoutingBucket(src)
+
+    local plantData = MySQL.query.await(
+        'SELECT plant_name, buying_price FROM player_plants WHERE player_identifier = ? AND plant_id = ?',
+        { playerIdentifier, routingBucket }
+    )
+
+    if not plantData or #plantData == 0 then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Sell Failed",
+            description = "You do not own this plant.",
+            type = "error"
+        })
+        return
+    end
+
+    local plantName = plantData[1].plant_name
+    local buyingPrice = plantData[1].buying_price
+    local penalty = math.floor(buyingPrice * (Config.SellPenaltyPercent / 100))
+    local sellPrice = buyingPrice - penalty
+
+    exports.ox_inventory:AddItem(src, "money", sellPrice)
+
+    local affectedRows = MySQL.update.await(
+        'DELETE FROM player_plants WHERE player_identifier = ? AND plant_id = ?',
+        { playerIdentifier, routingBucket }
+    )
+
+    if affectedRows == 0 then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Error",
+            description = "Failed to remove the plant from the database.",
+            type = "error"
+        })
+        return
+    end
+
+    TriggerClientEvent('ox_lib:notify', src, {
+        title = "Sell Successful",
+        description = string.format("You sold %s for $%d after a %d%% penalty.", plantName, sellPrice, Config.SellPenaltyPercent),
         type = "success"
     })
     
-    sendDiscordLog("Plant Purchased", "Player **" .. GetPlayerName(playerId) .. "** (ID: " .. playerId .. ") bought **" .. plantData.name .. "** for $" .. plantData.price, 3447003)
+    sendDiscordLog("Plant Sold", string.format(
+        "Player **%s** (ID: %d) sold **%s** for $%d after a %d%% penalty in bucket %d.",
+        GetPlayerName(src), src, plantName, sellPrice, Config.SellPenaltyPercent, routingBucket
+    ), 3447003)
 end)
 
 RegisterNetEvent('xalux_drug:enterInterior', function(plantName)
@@ -148,14 +277,14 @@ RegisterNetEvent('xalux_drug:enterInterior', function(plantName)
     local playerIdentifier = GetPlayerIdentifier(src)
 
     local plantData = MySQL.query.await(
-        'SELECT plant_id, interior_id FROM player_plants WHERE player_identifier = ? AND plant_name = ?',
-        { playerIdentifier, plantName }
+        'SELECT plant_id, interior_id, player_identifier FROM player_plants WHERE plant_name = ? AND (player_identifier = ? OR EXISTS (SELECT 1 FROM plant_permissions WHERE plant_id = player_plants.plant_id AND player_identifier = ?))',
+        { plantName, playerIdentifier, playerIdentifier }
     )
 
     if not plantData or #plantData == 0 then
         TriggerClientEvent('ox_lib:notify', src, {
             title = "Access Denied",
-            description = "You do not own this plant.",
+            description = "You do not own or have access to this plant.",
             type = "error"
         })
         return
@@ -163,8 +292,20 @@ RegisterNetEvent('xalux_drug:enterInterior', function(plantName)
 
     local plantId = plantData[1].plant_id
     local interiorId = plantData[1].interior_id
+    local ownerIdentifier = plantData[1].player_identifier
 
-    SetPlayerRoutingBucket(src, plantId)
+    local isOwner = (ownerIdentifier == playerIdentifier)
+
+    if plantId and tonumber(plantId) then
+        SetPlayerRoutingBucket(src, tonumber(plantId))
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = "Error",
+            description = "Failed to set routing bucket due to invalid plant ID.",
+            type = "error"
+        })
+        return
+    end
 
     local interior = Config.Interiors[interiorId]
     if not interior then
@@ -176,7 +317,7 @@ RegisterNetEvent('xalux_drug:enterInterior', function(plantName)
         return
     end
 
-    TriggerClientEvent('xalux_drug:teleportToInterior', src, interior.InsideCoords, plantName, interiorId)
+    TriggerClientEvent('xalux_drug:teleportToInterior', src, interior.InsideCoords, plantName, interiorId, isOwner)
 end)
 
 RegisterNetEvent('xalux_drug:leaveInterior', function(originalCoords)
@@ -244,4 +385,3 @@ RegisterNetEvent("xalux_drug:rewardPlayer", function(rewardItem, rewardAmount)
         TriggerClientEvent("xalux_drug:notify", playerId, "Error", "You can't carry the reward items!", "error")
     end
 end)
-
